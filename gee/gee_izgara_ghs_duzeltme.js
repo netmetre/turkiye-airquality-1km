@@ -1,0 +1,481 @@
+// ============================================================
+// CBS makalesi - 4b. betik: GHS DUZELTMESI (yalniz 2 gorev)
+// Cikti (EE_CBS_izgara): izg_statik_topo_ghs.tif ve ist_statik_izgara.csv (eskilerin yerine)
+// Kullanim: Run, Console'daki KONTROL satirina bak (Ankara nufus_1000 on binler olmali), Tasks > Run all
+// Asagidaki aciklama ana betikten kalmistir:
+// CBS makalesi - 4. betik: 1 km harita icin izgara degiskenleri
+// Proje: <your-earth-engine-project>
+// Cikti: Google Drive > EE_CBS_izgara klasoru
+//   Rasterlar (EPSG:4326, 30 yay saniyesi, Turkiye kutusu):
+//     izg_statik_topo_ghs.tif     topografya + GHS nufus/yapilasma tampon toplamlari
+//     izg_statik_wc_kucuk.tif     WorldCover sinif oranlari, 500 ve 1000 m
+//     izg_statik_wc_buyuk.tif     WorldCover sinif oranlari, 3000 ve 5000 m
+//     izg_yillik_2025.tif         NDVI ve gece isigi, 4 tampon, 2025
+//     izg_s5p_no2_2025.tif        73 gun (5 gunde bir), int16, x1e7 mol/m2
+//     izg_s5p_so2_2025.tif        73 gun, int16, x1e6 mol/m2
+//     izg_aod_2025.tif            73 gun, int16, ham MAIAC (x0.001)
+//     izg_era5_2025.tif           73 gun x 7 bant, 0.1 derece
+//   Tablolar:
+//     ist_statik_izgara.csv       ayni rasterlarin istasyon noktalarindaki degerleri
+//     ist_yillik_izgara.csv       NDVI ve gece isigi, 2019-2025, istasyon noktalari
+//     santraller.csv              WRI fosil yakitli santraller (konum, yakit, kapasite)
+// Kullanim: Run, sonra Tasks > Run all. Gorevler birkac saat surebilir.
+// ============================================================
+
+var KLASOR = 'EE_CBS_izgara';
+var BOLGE = ee.Geometry.Rectangle([25.5, 35.75, 45.0, 42.25], null, false);
+var CRS = 'EPSG:4326';
+var TR_30SS = [1 / 120, 0, 25.5, 0, -1 / 120, 42.25];
+var TR_ERA5 = [0.1, 0, 25.45, 0, -0.1, 42.35];
+var HARITA_YILI = 2025;
+var YILLAR = [2019, 2020, 2021, 2022, 2023, 2024, 2025];
+var ADIM_GUN = 5;
+var GUN_SAYISI = 73;            // 2025: 1 Ocak'tan baslayarak 5 gunde bir
+
+var ham = [
+  ['468478b7-ace5-4bd3-b89a-a9c1c2e53080','Adana - Çatalan','Adana',35.262032,37.186348],
+  ['9a381f61-657b-42ea-be87-ae7216ae953a','Adana - Çukurova','Adana',35.269984,37.040016],
+  ['bdc1f3d0-0048-4603-80bb-af46609a6900','Adana - Doğankent','Adana',35.346549,36.854139],
+  ['c31a108f-90bc-4426-b6bf-4a70239ab1b3','Adana - Meteoroloji','Adana',35.344017,37.004175],
+  ['c75060c5-d28b-4071-899e-b7fd29eba457','Adana - Valilik','Adana',35.312716,36.999344],
+  ['2b79754a-c5fa-4f28-8d36-b1594372efdc','Adana-Seyhan','Adana',35.315307,36.971898],
+  ['0ed2ff0e-9900-4e7b-ba64-c40e820104b2','Adana-Turhan Cemal Beriker Bulvarı ','Adana',35.326048,36.991919],
+  ['a0798101-04dc-4964-8c00-487825b35fc1','Adana-Yakapınar','Adana',35.606623,36.957839],
+  ['291d6758-cd2d-4bd3-bcb5-1280baf23a40','Adıyaman','Adıyaman',38.277406,37.755113],
+  ['9b169e4c-7e01-4fc0-a29b-99a9a55ce0f2','Afyon - Merkez/Karayolları','Afyonkarahisar',30.553607,38.747946],
+  ['12052834-4c46-4d1b-bc3b-531f6ad4404d','Afyon - Sandıklı','Afyonkarahisar',30.268768,38.460479],
+  ['9ae9635a-b122-4626-8a51-46a71ffbcb96','Afyon-Selçuk Cami','Afyonkarahisar',30.527957,38.773420],
+  ['73dc8b4a-51d0-4055-992d-48d934df56d3','Ağrı','Ağrı',43.038675,39.719534],
+  ['5d39b9c7-b0db-49dc-b24b-1d4406819483','Ağrı - Doğubeyazıt','Ağrı',44.078250,39.548970],
+  ['4e954b63-7d7a-4d45-8662-fddeb9c4ace5','Ağrı - Patnos','Ağrı',42.852922,39.236594],
+  ['c8787cc3-6a70-48d9-aca4-3bdcda8ea3bb','Aksaray','Aksaray',34.028515,38.364475],
+  ['53569697-8adc-408b-a406-eaaca110b00d','Amasya','Amasya',35.835516,40.666479],
+  ['d427e84e-2ec4-49a7-818a-135e002731a3','Amasya - Merzifon','Amasya',35.457419,40.874306],
+  ['15cf6271-60b4-4dae-9d7f-022460816e3b','Amasya - Suluova','Amasya',35.647985,40.823063],
+  ['3b1e9930-2774-4b2b-977a-44bbc915df64','Amasya - Şehzade','Amasya',35.838365,40.657212],
+  ['8a689bdc-41cb-44fd-adc2-67863efb86db','Amasya Üniversitesi Rektörlüğü (Seyyar - 06DV9981)','Amasya',35.807330,40.654318],
+  ['251a7ea1-e3ff-4b2f-a4d2-1231118f83fa','Ankara - Bahçelievler','Ankara',32.822920,39.918361],
+  ['fcdb32a0-2456-457f-b312-415956e8e1e6','Ankara - Batıkent','Ankara',32.726985,39.953142],
+  ['eec16797-8c1b-400a-b54f-2ae953afc694','Ankara - Çankaya','Ankara',32.857702,39.871059],
+  ['0ef764db-fca4-437f-8db5-3ffba88a6073','Ankara - Demetevler','Ankara',32.795655,39.967752],
+  ['b6cee520-e791-43ad-8584-be4a6cdb89bc','Ankara - Etimesgut','Ankara',32.640002,39.939824],
+  ['a24eb747-acf0-479b-8308-153f0692c6e1','Ankara - Etlik','Ankara',32.822787,39.973856],
+  ['073ba16f-a576-45ee-b0cf-e56aa70f2253','Ankara - Kayaş','Ankara',32.926748,39.925397],
+  ['c960495f-431d-43ef-a4a2-dc663214b73a','Ankara - Keçiören Sanatoryum','Ankara',32.856060,39.999041],
+  ['ec35e67b-2f49-4568-add1-d82425656a53','Ankara - Mamak','Ankara',32.893972,39.916812],
+  ['4ef4bba3-8aeb-47ff-92ec-abea041e6001','Ankara - Ostim','Ankara',32.744050,39.981411],
+  ['a87c1c3e-e5aa-4629-8081-96297e4f172e','Ankara - Polatlı','Ankara',32.129436,39.576622],
+  ['ed5b48d0-14c4-47a4-8ad1-b5db53ae72c9','Ankara - Sıhhıye','Ankara',32.859402,39.927252],
+  ['733f07df-4743-4510-92b9-c5a6602a7f00','Ankara - Sincan','Ankara',32.581726,39.953059],
+  ['6edbea5e-e575-4f89-9d7b-621c2e0c6c44','Ankara - Siteler','Ankara',32.907229,39.965362],
+  ['8edebd0f-64ed-4221-9430-79627451d882','Ankara - Törekent','Ankara',32.576514,39.983746],
+  ['98a17be3-8c0f-419c-acc0-a31a77ed6859','Ankara - Ulus','Ankara',32.849918,39.940070],
+  ['e3619d68-f50f-4657-a9de-1b387156ac88','Ankara / Eryaman (06 THL 77)','Ankara',32.622434,40.007851],
+  ['e7dc40a8-a1b2-44de-99bc-33770261e101','Ankara Yaşamkent','Ankara',32.639667,39.861708],
+  ['70ed2593-0349-447d-8379-66edcfebef39','Antalya - Alanya','Antalya',31.986457,36.555038],
+  ['41c45b89-cc96-4378-be68-0a3d113fa324','Antalya - Gazipaşa','Antalya',32.287343,36.281096],
+  ['e710800e-41de-4c3d-ada8-6931b23d94da','Antalya - Kepez','Antalya',30.700467,36.914886],
+  ['f4ef2c5c-ed19-434d-bd94-37d338994c44','Antalya - Kumluca','Antalya',30.277470,36.317707],
+  ['ecd01521-0b0d-41ae-ba95-7cf761c80331','Antalya - Manavgat','Antalya',31.452650,36.789745],
+  ['fff7e822-17ef-42a6-9095-46776435f324','Antalya - Muratpaşa','Antalya',30.733426,36.892365],
+  ['36b6a6e2-056d-4671-ac00-a65804e5eb13','Antalya - Serik','Antalya',31.092912,36.918172],
+  ['a28335de-f862-48fe-bae4-c653e26cc640','Antalya - Trafik','Antalya',30.683580,36.888733],
+  ['58dff545-6a85-45a7-a045-547c9ea17711','Ardahan','Ardahan',42.705206,41.106372],
+  ['b929aa36-b6f2-441e-b0e7-1dd8d3dad243','Artvin','Artvin',41.818530,41.175344],
+  ['460a3f3c-0395-4372-8a58-c84837ab144d','Artvin - Hopa','Artvin',41.491322,41.467965],
+  ['529250fd-20b0-465c-b048-ad867d06a5e5','Aydın','Aydın',27.817715,37.854397],
+  ['9e1061e0-3ba0-4803-8883-a25a3a5ec0f5','Aydın - Didim','Aydın',27.207830,37.358508],
+  ['e3852967-13f5-4657-a25e-2004a9a9ee97','Aydın - Efeler','Aydın',27.840882,37.833953],
+  ['30501c78-3f09-4c38-beae-c8a8d1c1edc4','Aydın - Germencik','Aydın',27.664702,37.863143],
+  ['724cc12d-9c44-4fed-b72d-29587bb581fd','Aydın - Nazilli','Aydın',28.322024,37.907907],
+  ['b4baec8c-c7c7-45f4-ae31-f2849545ee13','Aydın - Söke','Aydın',27.411384,37.752654],
+  ['8bc851d6-0d81-420f-b0fd-244f2abc1433','Aydın - Trafik','Aydın',27.845454,37.839416],
+  ['9eddd8f1-cf1b-4284-aa41-a9b32d87c702','Balıkesir','Balıkesir',27.893249,39.639192],
+  ['b0951268-0548-4f75-8740-e028e5775d20','Balıkesir - Bandırma-MTHM','Balıkesir',27.974925,40.347961],
+  ['bb04d2d0-aec5-49c4-b917-c2820bcfc8f8','Balıkesir - Edremit - MTHM','Balıkesir',27.004012,39.599666],
+  ['514cea10-d14d-4ec9-a035-1a99623ee81a','Balıkesir - Erdek-MTHM','Balıkesir',27.978928,40.489738],
+  ['11b764c9-a731-4cab-a40b-4d25c1a92593','Balıkesir - Merkez - MTHM','Balıkesir',27.890470,39.648673],
+  ['2af876e1-cf2d-4cf2-bc06-a8863c66710a','Bartın','Bartın',32.336506,41.632216],
+  ['201e9efc-4abe-457f-83f5-dd918eff512d','Batman','Batman',41.141073,37.899706],
+  ['23ac6ffc-1067-4c8e-ad2d-2ba5da78b876','Batman - 2','Batman',41.108308,37.889111],
+  ['2251836e-afa4-40d6-9135-04551e7ce431','Bayburt','Bayburt',40.220497,40.254689],
+  ['55adcc75-632c-4fcf-9310-96f727af7020','Bilecik','Bilecik',29.977811,40.141426],
+  ['73ab878a-0bd0-4104-b7d7-63a4acb2678a','Bilecik - Bozüyük-MTHM','Bilecik',30.053124,39.904062],
+  ['37ece370-b131-43d6-b6f0-aa080d8a1b2f','Bingöl','Bingöl',40.506008,38.886322],
+  ['468cc0a0-b049-4da4-ba17-e392ef06eca7','Bitlis','Bitlis',42.111251,38.409301],
+  ['29882680-c708-43f0-aaaa-0c15cb450fee','Bolu - Abant','Bolu',31.259381,40.603577],
+  ['954b562e-1c2e-49ae-804f-b284a56e5d52','Bolu - Karaçayır Parkı','Bolu',31.605027,40.726390],
+  ['168b8c5b-f0a5-4a89-a3fc-303799bf23de','Bolu - Kızılay Parkı','Bolu',31.599443,40.732414],
+  ['220efbcd-5c23-411d-8a76-439c448c51c9','Burdur','Burdur',30.293851,37.722105],
+  ['60d3d2c2-5f2c-4149-ad90-830b3dafaba2','Burdur - Bucak','Burdur',30.567262,37.452841],
+  ['8c0447cf-a815-4811-868c-2ae7051f8d2f','Bursa','Bursa',29.035310,40.216462],
+  ['69b665c8-f69d-4e26-8f01-2e01ba357634','Bursa - Beyazıt Cad.-MTHM','Bursa',29.080475,40.185712],
+  ['1462f679-70f0-4de4-a925-e0a5c1b86221','Bursa - İnegöl-MTHM','Bursa',29.492259,40.077596],
+  ['76bc83d7-8391-4fd5-8587-0afecb8aef16','Bursa - Kestel-MTHM','Bursa',29.205516,40.195481],
+  ['6d7379b2-a240-4670-ab65-b04671c43373','Bursa - Kültür Park-MTHM','Bursa',29.046154,40.195739],
+  ['90e8d8b6-794c-4ce3-b432-60d2e1e2446d','Bursa - Nilüfer','Bursa',28.828994,40.184166],
+  ['7522614a-37ec-400d-a01a-13bfc58b2688','Bursa - Uludağ Üniv.-MTHM','Bursa',28.876210,40.222040],
+  ['879bbab7-c88a-4ed6-8f67-a772bafabdb5','Bursa-Gürsu','Bursa',29.187471,40.206476],
+  ['ca4b7a1e-520a-4795-9b2e-1f4df41d81d9','Bursa-Kestel (Hilal Parkı)','Bursa',29.218585,40.195121],
+  ['45aeb0fb-adac-499a-90f2-53c34c905603','Bursa-Nilüfer','Bursa',28.962808,40.209923],
+  ['c5af5da0-cec1-4782-ac0a-7d7a85b5f0f1','Çanakkale','Çanakkale',26.399360,40.141574],
+  ['2d646ef9-dc60-459a-938e-62f1a68de597','Çanakkale - Biga - MTHM','Çanakkale',27.242630,40.214908],
+  ['c63ac516-a633-4290-b1d5-5c225b96b367','Çanakkale - Biga İçdaş','Çanakkale',27.107311,40.417294],
+  ['abc52c1b-0dfa-46ab-b4eb-028a30f35ed6','Çanakkale - Çan-MTHM','Çanakkale',27.045610,40.028592],
+  ['1d21b76f-babc-4909-b6c6-ae581a724ba2','Çanakkale - Lapseki-MTHM','Çanakkale',26.770674,40.403002],
+  ['adca6b11-c1f3-4a09-8f81-36d127177c07','Çankırı','Çankırı',33.624333,40.595910],
+  ['a426a9f3-00db-4e08-97ac-fb4b3884ea6c','Çorum','Çorum',34.963066,40.554150],
+  ['3793c2a7-f347-4f36-a756-237aca1d5d12','Çorum - Bahabey','Çorum',34.967573,40.546383],
+  ['410c264c-4374-44e0-8290-12df7068725c','Çorum - Mimar Sinan','Çorum',34.944300,40.531400],
+  ['3c562951-0291-4be9-8405-f0424355353b','Denizli - Bayramyeri','Denizli',29.080228,37.780156],
+  ['6f219e78-f84e-415f-95bf-f975ca45fc84','Denizli - Çivril','Denizli',29.737276,38.300925],
+  ['4a62ebde-999c-4113-97f4-14ed0d2328a3','Denizli - Honaz','Denizli',29.264756,37.756481],
+  ['a6756a86-6814-43e1-a500-1baef35b11cf','Denizli - Merkezefendi','Denizli',29.032092,37.776192],
+  ['1599cdaf-31de-4518-9c2b-a7c101097850','Denizli - Sümer','Denizli',29.093776,37.788823],
+  ['eb3da119-cc11-4327-a973-54a6cc9cb7db','Denizli - Trafik','Denizli',29.095891,37.767357],
+  ['bd874dd5-a88f-4659-a966-c9dbc643bf93','Diyarbakır','Diyarbakır',40.224919,37.915375],
+  ['0f3b9672-170d-4f33-9549-03f02e3e38f0','Diyarbakır - Bağlar','Diyarbakır',40.166909,37.919898],
+  ['800c71ba-9668-4df7-9cd4-226cbdb7445b','Diyarbakır - Diclekent','Diyarbakır',40.184854,37.943013],
+  ['c7fe8c73-491d-4e7e-8d16-3632513295f3','Diyarbakır - Talaytepe','Diyarbakır',40.135543,37.935092],
+  ['7e2c786d-3cdb-475a-bb48-caad2306a566','Diyarbakır - Üçkuyular','Diyarbakır',40.146451,37.964572],
+  ['8c4e2bce-79a1-4970-beda-e5cae28bd790','Düzce','Düzce',31.138749,40.841455],
+  ['575c379c-3b84-43bf-b5b8-8d9aa833488c','Düzce - Bahçeşehir','Düzce',31.228816,40.860679],
+  ['00fea4a4-20f6-4a2d-9390-90a385f24907','Düzce - Belediye','Düzce',31.161963,40.838715],
+  ['ed9a6e1d-1058-4b33-81bb-b5feb917e52e','Edirne','Edirne',26.584781,41.657899],
+  ['74c2cfa0-2131-4c24-88a8-d8f3732bab19','Edirne - Karaağaç-MTHM','Edirne',26.537327,41.659140],
+  ['7457faa5-ccef-4f05-857a-57f809ae8c01','Edirne - Keşan-MTHM','Edirne',26.637123,40.849198],
+  ['c2cf2cc5-04df-47ed-9686-b658221526f2','Elazığ','Elazığ',39.208524,38.674027],
+  ['e4add9c8-61de-4aa3-b781-aa130e7d4c1f','EMEP - Ankara Çubuk','Ankara',33.012927,40.289776],
+  ['6645d178-7d3c-4aa7-a2e7-7e2008852821','EMEP - İzmir Seferihisar','İzmir',26.834094,38.230416],
+  ['2eb616a1-4644-406b-96f0-253b9008aa26','EMEP - Kırklareli Vize','Kırklareli',27.813627,41.586353],
+  ['e21efb2b-6f82-4f00-8d1e-ea94cacdcfff','Erzincan','Erzincan',39.495327,39.743320],
+  ['4a5df435-f064-4031-b824-61c84f4aa309','Erzincan - Trafik','Erzincan',39.497041,39.746451],
+  ['cd53ad65-780d-4f88-9493-f6f0cadfc41e','Erzurum','Erzurum',41.272565,39.898143],
+  ['790c34fc-7b13-4a05-932f-e8094051b227','Erzurum - Aziziye','Erzurum',41.269693,39.917759],
+  ['9a9414d8-4ab6-4d77-9643-7695c9ef8231','Erzurum - Palandöken','Erzurum',41.275032,39.869133],
+  ['7b20ced2-0018-4869-8b12-7dadc27889a9','Erzurum - Pasinler','Erzurum',41.572205,40.033561],
+  ['1e811293-62fd-472b-a3e6-a883575444e8','Erzurum - Taşhan','Erzurum',41.273069,39.907813],
+  ['075baaeb-f534-4550-bf35-54e75c2a1d40','Eskişehir - Cumhuriyet Bulvarı','Eskişehir',30.529872,39.766353],
+  ['6c495e9e-06cd-4d20-b6b5-5aba277db99b','Eskişehir - Metin Sonmez','Eskişehir',30.617544,39.714756],
+  ['0e65b889-6465-48f5-8108-247950f1d17f','Eskişehir - Odunpazarı','Eskişehir',30.563835,39.758034],
+  ['729ea87f-38c3-4729-9c7c-1ecee0b122a7','Eskişehir - Tepebaşı','Eskişehir',30.501171,39.780563],
+  ['492a7d0d-84f0-4501-ae15-a7b466d3fca8','Eskişehir - Vişnepark','Eskişehir',30.497277,39.764846],
+  ['4959a479-6cc2-4dd3-84f9-6a906f7c3ed1','Gaziantep','Gaziantep',37.350810,37.058562],
+  ['207c6f14-8243-4a49-b970-367cb0e93b96','Gaziantep - Beydilli','Gaziantep',37.395555,37.044376],
+  ['e75cdf48-82f9-4692-afe5-46ab3f7fbbe9','Gaziantep - Fevzi Çakmak','Gaziantep',37.354571,37.078013],
+  ['ffd0ab04-19ab-4245-b5d4-9fc005f0a335','Gaziantep - Gaski D6','Gaziantep',37.359130,37.047107],
+  ['69040255-723b-4eef-969a-7d1c95e81560','Gaziantep - Nizip','Gaziantep',37.803975,37.009954],
+  ['56b75be4-b4cb-49d2-b126-4bb3974469c1','Gaziantep-Atapark ','Gaziantep',37.425862,37.088664],
+  ['440cbe5b-2167-42df-88fb-82395aaad2d5','Giresun','Giresun',38.340289,40.913074],
+  ['0dfb1fb4-230e-417d-92cb-e354d8495ef9','Giresun - Gemilercekeği','Giresun',38.398728,40.914499],
+  ['aed43b4c-973b-448a-9a17-7bb8f041aca6','Gölbaşı/Ankara (Seyyar-06DV9975)','Ankara',32.756903,39.752517],
+  ['b368e8c5-7b63-4494-835c-4c7b7daad1cf','Gümüşhane','Gümüşhane',39.480593,40.459956],
+  ['b358570b-ad24-4750-b667-e8c26f115a21','Hakkari','Hakkari',43.738824,37.574346],
+  ['ae454df6-b450-44e5-aa51-d0e0f4481edf','Hatay - İskenderun','Hatay',36.223851,36.713970],
+  ['78260ef6-a391-44c9-bf25-d1ad45a47135','Hatay - İskenderun Merkez','Hatay',36.166819,36.579757],
+  ['ec772d9f-3404-476c-8516-1e6fa570d7c5','Iğdır','Iğdır',44.053800,39.926422],
+  ['2a865979-15b8-48d4-9f37-0751302aa854','Iğdır - Aralık','Iğdır',44.620122,39.786290],
+  ['19ecf277-cd82-4391-ba82-be0f522c1c12','Isparta','Isparta',30.579413,37.760251],
+  ['51559f81-4f78-4e4c-9b84-25830e1b3104','İliç/Erzincan (Seyyar-06THL79)','Erzincan',38.533117,39.448328],
+  ['cb4cd1c2-b55b-484f-ac7a-505369405d00','İstanbul - Aksaray','İstanbul',28.953954,41.014411],
+  ['06cf354f-c56f-4375-a6c5-bb3d5e7d649e','İstanbul - Alibeyköy','İstanbul',28.946117,41.057382],
+  ['7ba8a159-e8bc-4225-b5e4-ccf8bde97aa5','İstanbul - Arnavutköy','İstanbul',28.707558,41.220919],
+  ['4c41948b-232e-472c-ada9-8f4d575c56ac','İstanbul - Avcılar','İstanbul',28.730429,40.987268],
+  ['573c0ee4-9a0e-4ad9-aa2f-860870932189','İstanbul - Bağcılar','İstanbul',28.842948,41.032754],
+  ['6d169752-eabc-4f7e-87ea-6cf10b452486','İstanbul - Başakşehir-MTHM','İstanbul',28.789872,41.095527],
+  ['179cd958-11aa-4e7a-8fa4-6eb2c852c2f6','İstanbul - Beşiktaş','İstanbul',29.009403,41.052007],
+  ['41f90c1f-570d-46cd-9beb-493d9162639a','İstanbul - Beylikdüzü','İstanbul',28.612778,40.971649],
+  ['d6838e88-162e-4394-bd3c-efb9de513ac6','İstanbul - Büyükada','İstanbul',29.118039,40.852147],
+  ['b9709aaf-454d-4e41-af8c-ddc4302b1014','İstanbul - Çatladıkapı','İstanbul',28.975123,41.002333],
+  ['914b525e-f275-41e1-b45b-118ada8f08c3','İstanbul - Esenler','İstanbul',28.888074,41.036866],
+  ['ee13196f-69cc-4a64-91af-16c31cf3fc00','İstanbul - Esenyurt-MTHM','İstanbul',28.668853,41.019340],
+  ['08fa75a5-277b-4562-bf51-be549c9a25a2','İstanbul - Göztepe D 100','İstanbul',29.070211,40.993361],
+  ['ecafeb15-905e-4257-a25a-72accf287e2a','İstanbul - Kadıköy','İstanbul',29.033374,40.990811],
+  ['2f8ab9f0-eb04-4d62-bf67-d165cb015035','İstanbul - Kağıthane','İstanbul',28.970786,41.078505],
+  ['d9f15eae-128a-4a71-ad30-141b4728a520','İstanbul - Kağıthane-MTHM','İstanbul',28.974818,41.092354],
+  ['61c3752d-2ff9-4d46-bc84-d7f303fa92e0','İstanbul - Kandilli','İstanbul',29.058247,41.062475],
+  ['e3cf98ea-d56d-4703-9dc2-b102c2a8b199','İstanbul - Kandilli-MTHM','İstanbul',29.059006,41.074642],
+  ['9e389c7a-45bd-440a-ba2f-db9c60c65a82','İstanbul - Kartal','İstanbul',29.183052,40.911041],
+  ['8cff7d4d-a5be-4e74-93ff-e75437639604','İstanbul - Kumköy','İstanbul',29.038290,41.250436],
+  ['6b7a9840-1e13-4045-a79d-0f881c4852ad','İstanbul - Maslak','İstanbul',29.024504,41.100071],
+  ['540c64a9-8411-4504-8982-9fc23ac2679e','İstanbul - Mecidiyeköy-MTHM','İstanbul',28.994339,41.065992],
+  ['8e79f4d4-95e2-43db-ab78-59921013af3d','İstanbul - Sancaktepe','İstanbul',29.225942,41.003224],
+  ['ed81dc69-345a-479d-8b9b-e82db11b276e','İstanbul - Sarıyer','İstanbul',29.048499,41.127924],
+  ['2054f684-6a42-438f-ae03-bb90445e71e6','İstanbul - Selimiye','İstanbul',29.027005,41.003763],
+  ['7a8fdd1a-2aae-4128-a1b6-1064d760d108','İstanbul - Silivri-MTHM','İstanbul',28.255523,41.089256],
+  ['2fa5ef85-c842-49e0-9581-39f6dc0a6fa4','İstanbul - Sultanbeyli-MTHM','İstanbul',29.268830,40.984493],
+  ['593780cc-69d7-417c-8089-8672c509bc0b','İstanbul - Sultangazi 1','İstanbul',28.894345,41.109139],
+  ['3cb2525d-15e6-48b7-84d2-df139b14e991','İstanbul - Sultangazi 2','İstanbul',28.874384,41.107734],
+  ['aa68d3ab-2188-4821-869d-a528b61a05c6','İstanbul - Sultangazi 3','İstanbul',28.851934,41.114419],
+  ['575665d7-e92d-4a1c-bc0d-ea9d5dcc5ed9','İstanbul - Sultangazi-MTHM','İstanbul',28.874321,41.107712],
+  ['05fc36cb-0383-4df4-8a30-08d0a9612e41','İstanbul - Şile-MTHM','İstanbul',29.563042,41.170371],
+  ['7ceba13a-7281-4420-a941-6e53fc276c45','İstanbul - Şirinevler-MTHM','İstanbul',28.838666,41.002439],
+  ['8202bca5-c2cd-4291-a90c-c547d2f60b95','İstanbul - Şişli Eğitim -MTHM','İstanbul',28.997328,41.054189],
+  ['3de006fe-6252-4f09-8a08-4539ed5cb43c','İstanbul - Tuzla','İstanbul',29.302619,40.843116],
+  ['377e1216-bcc7-42c0-aad8-4d5b3d602b78','İstanbul - Ümraniye','İstanbul',29.161810,41.012685],
+  ['c83902d3-a077-48aa-83b5-046ce9d13027','İstanbul - Ümraniye-MTHM','İstanbul',29.099746,41.024439],
+  ['a30101a6-349c-4f0d-b965-a68f2c6781e9','İstanbul - Üsküdar','İstanbul',29.024692,41.014261],
+  ['d8cd7cce-02b0-42cc-be36-376f85e1bd79','İstanbul - Üsküdar-MTHM','İstanbul',29.024909,41.027060],
+  ['6929a9ca-977d-4cb3-b1b5-26b95f4d4515','İstanbul - Yenibosna','İstanbul',28.827040,40.997381],
+  ['6dbac7ff-1177-4de5-8684-a1590a696ba2','İzmir - Aliağa','İzmir',26.963527,38.795041],
+  ['bc9c0cbe-eb38-46bd-a1da-535ba40d728b','İzmir - Aliağa - Bozköy','İzmir',26.959087,38.724426],
+  ['fcb6d9b7-11f6-428d-b251-35fc5d89195f','İzmir - Alsancak İBB','İzmir',27.144444,38.432222],
+  ['ca22007c-ffb4-40a3-adf4-2fb3ae5bf716','İzmir - Bayraklı İBB','İzmir',27.166667,38.462222],
+  ['900c4af1-d77f-4b50-b1c1-7febc6d9c31d','İzmir - Bergama İBB','İzmir',27.191392,39.111204],
+  ['00b1dcdb-702d-459b-8399-30548d8164ec','İzmir - Bornova','İzmir',27.231113,38.454619],
+  ['5095a053-4859-498f-88e9-bae31c596f7f','İzmir - Bornova İBB','İzmir',27.221389,38.469167],
+  ['45ee5bb3-7719-49b5-8889-6821e150ab60','İzmir - Çeşme','İzmir',26.234104,38.279083],
+  ['9edcc21d-67b8-45c4-ace2-a045b6e171cf','İzmir - Çiğli İBB','İzmir',27.067778,38.498056],
+  ['376cfe9f-0a11-4483-8f49-c8f444bee984','İzmir - Eğitim İstasyonu','İzmir',27.199764,38.422165],
+  ['e19afdb5-37a4-48d6-b13b-a04793312030','İzmir - Gaziemir','İzmir',27.136240,38.316893],
+  ['332d897b-81d5-427c-a278-6b9b841da3d5','İzmir - Güzelyalı İBB','İzmir',27.082778,38.395833],
+  ['1f4e258c-2212-46b0-a3db-f97182b57737','İzmir - Karabağlar','İzmir',27.106633,38.384056],
+  ['f85eedd5-224b-45e9-88fd-757fe4c0a72e','İzmir - Karaburun','İzmir',26.563730,38.584920],
+  ['062c071b-d2cf-4315-a6bc-e7a81b99b9a2','İzmir - Karşıyaka','İzmir',27.114558,38.460749],
+  ['1eb466d5-8d74-495e-8b22-637febcdc5c2','İzmir - Karşıyaka İBB','İzmir',27.109722,38.454167],
+  ['862bd2b3-3434-4a69-8b7a-1b9dccdec63c','İzmir - Konak','İzmir',27.140730,38.423893],
+  ['785688ab-6414-43cd-9b25-1491e0c49ec7','İzmir - Menemen','İzmir',27.077621,38.610236],
+  ['85142ffb-5e36-4ac9-a023-59e20533546a','İzmir - Ödemiş','İzmir',27.970846,38.225940],
+  ['4f00873d-af5c-49bf-97ea-b495a29e4271','İzmir - Şirinyer İBB','İzmir',27.148333,38.382500],
+  ['7fb1186a-c269-4b5a-898f-8215d6903920','İzmir - Torbalı','İzmir',27.362751,38.145461],
+  ['488a7170-05ff-4366-ba4b-a86d27d262e3','İzmir - Yenifoça','İzmir',26.831685,38.744728],
+  ['293b13f9-1e05-458d-ab2c-b4eb48a6ffa0','İzmir Güzelbahçe İBB','İzmir',26.889141,38.373453],
+  ['0a52d5f6-eb80-42ea-99d0-7233f7773538','İzmir-Kemalpaşa','İzmir',27.412692,38.430759],
+  ['3c40490a-406a-424d-a199-5373212955dd','Kahramanmaraş - Elbistan','Kahramanmaraş',37.198175,38.203674],
+  ['fe7d131a-b5ea-4c4c-9272-070a94d3fc2e','Kahramanmaraş - Onikişubat','Kahramanmaraş',36.898518,37.584966],
+  ['9902ebf4-b13b-4123-b856-d0df9ec8a228','Karabük - 75. Yıl ','Karabük',32.662093,41.229814],
+  ['4b418e5d-ca52-4710-b6b7-ce89ee1b3609','Karabük - Kardemir 1','Karabük',32.627233,41.192103],
+  ['6afef1b1-1b48-4545-9d53-d0e1461de1e5','Karabük - Kardemir 2','Karabük',32.630978,41.179742],
+  ['3a6911b6-b0f2-4262-85ae-dcadd33c3d92','Karabük - Safranbolu','Karabük',32.673372,41.253163],
+  ['65368962-c50c-4d4c-b0f6-90a8b7b22b66','Karabük - Tören Alanı','Karabük',32.623490,41.197224],
+  ['2af14e3a-831c-4476-a623-526ab1e92e39','Karaman','Karaman',33.227119,37.170972],
+  ['1b26a068-8741-4890-8362-de56754cda85','Karaman - Ermenek','Karaman',32.884883,36.640542],
+  ['bda017af-be25-4c5a-8621-4215f24534de','Kars - İstasyon Mah.','Kars',43.104734,40.605156],
+  ['6b07d8e7-0de7-47ed-a215-f1547dfb1151','Kars - Trafik','Kars',43.096838,40.600949],
+  ['9af4e053-1032-4f95-b6d9-0f874119a153','Kastamonu','Kastamonu',33.778114,41.388892],
+  ['3250d2a7-df2b-40ac-9137-96b321454a20','Kastamonu - Azdavay','Kastamonu',33.504510,41.685939],
+  ['06be4d8d-ae1b-4d7e-b67a-c034abdc3992','Kayseri - Hürriyet','Kayseri',35.470193,38.715252],
+  ['46d1740c-6c61-49b0-ac3a-39702a83bc33','Kayseri - Kocasinan','Kayseri',35.481910,38.744626],
+  ['6d586cdf-89e3-4622-ba6c-643710d98676','Kayseri - Melikgazi','Kayseri',35.518726,38.722907],
+  ['c3892899-860e-4f2a-ac46-308590fd3d8b','Kayseri - OSB','Kayseri',35.375400,38.740461],
+  ['020ac440-2eaa-4bfc-81fe-aa4e5fd57c30','Kayseri - Talas','Kayseri',35.553455,38.698939],
+  ['410336ce-0c4f-45ba-9c2a-e5470b41551e','Kayseri - Trafik','Kayseri',35.486888,38.717305],
+  ['094547d5-bf2b-44bf-8016-0750ad767211','Kırıkkale','Kırıkkale',33.518214,39.843179],
+  ['7f426b4e-88e3-4132-b9b6-9bffb7721eb6','Kırıkkale - Bulvar Park','Kırıkkale',33.499900,39.844499],
+  ['c0eb93c9-d231-438b-a2b6-9fb9bf37247d','Kırklareli','Kırklareli',27.214833,41.724432],
+  ['1b346806-f22c-4347-99e9-2479ac16ac2b','Kırklareli - Limanköy-MTHM','Kırklareli',28.056035,41.885286],
+  ['90760447-592c-4d0a-90f0-59357f9655df','Kırklareli - Lüleburgaz-MTHM','Kırklareli',27.348235,41.398015],
+  ['918ea8ac-f47d-465d-b82e-9489844514c2','Kırşehir','Kırşehir',34.168244,39.138118],
+  ['2781f406-d7ec-494a-8fc2-94898a18016a','Kilis','Kilis',37.127129,36.715430],
+  ['15658d72-2e89-442c-b167-9d742a8f6348','Kocaeli','Kocaeli',29.949307,40.764524],
+  ['30fa1781-ca99-4e08-8b7a-5d47727acfa5','Kocaeli - Alikahya-MTHM','Kocaeli',30.007708,40.770971],
+  ['405d6bab-7d31-4056-b914-015b8e7306b5','Kocaeli - Dilovası','Kocaeli',29.537197,40.788734],
+  ['1bd35510-426a-4934-9c0f-e9fe22750ee8','Kocaeli - Dilovası-İMES OSB 1-MTHM','Kocaeli',29.583313,40.811465],
+  ['9c126c73-f8bd-4dd5-9a92-2399041bef4a','Kocaeli - Dilovası-İMES OSB 2-MTHM','Kocaeli',29.580350,40.838347],
+  ['2b6f165b-dbef-4d0a-a938-c262012a4df3','Kocaeli - Gebze - MTHM','Kocaeli',29.436184,40.810431],
+  ['59f64c81-69da-4750-83b4-cdd5a89fabda','Kocaeli - Gebze OSB - MTHM','Kocaeli',29.425182,40.845778],
+  ['0e7f071a-744a-46e1-ba0c-fc85cd589f58','Kocaeli - Gölcük-MTHM','Kocaeli',29.795289,40.726356],
+  ['0dcb32e7-85c1-4c66-adba-fbe4771f9994','Kocaeli - İzmit-MTHM','Kocaeli',29.938401,40.768180],
+  ['b7a0d184-331c-4ab0-b2c3-d80bac39db0f','Kocaeli - Kandıra-MTHM','Kocaeli',30.006650,41.131023],
+  ['b046ee76-3503-4751-8d22-0746a7e554c7','Kocaeli - Körfez-MTHM','Kocaeli',29.788912,40.746099],
+  ['94b5c684-1c23-4da9-a193-8c1a21e3b3a5','Kocaeli - Yeniköy-MTHM','Kocaeli',29.884500,40.704197],
+  ['95f02c10-c8a5-411c-96f4-bdb2f5cd122a','Konya - Akşehir','Konya',31.420260,38.355686],
+  ['9755df5d-5c4a-47f0-b748-b600477564b4','Konya - Bosna','Konya',32.521247,38.012035],
+  ['db3099d9-3b4b-492c-929d-3971fa0ccd42','Konya - Karkent','Konya',32.528877,37.899851],
+  ['26b060a2-b5f4-4d13-92c8-d1fb239722b7','Konya - Laboratuvar','Konya',32.448930,37.899530],
+  ['221cc41a-5d98-47eb-99f8-6f2d52948463','Konya - Meram','Konya',32.475316,37.860098],
+  ['d216d40e-e569-4397-9e82-3cd4bd881636','Konya - Sarayönü','Konya',32.457538,38.494111],
+  ['248d338b-6f5b-4492-b805-e46fb2528e4d','Konya - Trafik','Konya',32.493586,37.888313],
+  ['aa578dcd-5654-4282-af39-3765c54cf050','Konya-Ereğli','Konya',34.043926,37.512178],
+  ['527475d6-66f5-4023-8b97-f60ff4557121','Konya-Erenköy-Belediye','Konya',32.460009,37.906802],
+  ['81ad3847-bdfd-4520-be48-4fde44a7e97d','Konya-Karatay (Sunaypark)','Konya',32.513342,37.844489],
+  ['56662403-7c58-42f8-929e-911cca9e99fe','Konya-Karatay-Belediye','Konya',32.516311,37.868194],
+  ['7c376f53-a218-4b62-9428-fac0c9a4f0a6','Konya-Selçuklu-Belediye','Konya',32.500161,37.915908],
+  ['d07cf4db-1548-4a41-b1f4-f267ca47df62','Kütahya - Atatürk Bulvarı','Kütahya',29.988782,39.423590],
+  ['f749f9d3-6815-4b0f-89f7-763b836131f9','Kütahya - Heymeana Cad.','Kütahya',30.008615,39.411876],
+  ['b7121624-b3a3-41af-8485-49bc60fe13bc','Kütahya - Kentpark','Kütahya',29.969811,39.428180],
+  ['1471766a-b827-44de-be15-a0e452e12874','Kütahya - Tavşanlı','Kütahya',29.492289,39.542097],
+  ['55268802-e8d7-4665-b063-05502db18cc3','Malatya','Malatya',38.341083,38.349753],
+  ['d5d4c5ff-12d5-4fbe-9199-88ab410020f4','Manisa','Manisa',27.404932,38.615374],
+  ['114b79f4-ede4-44d6-8154-c5dece13f499','Manisa - Akhisar','Manisa',27.840495,38.927138],
+  ['bc2deba2-f0b0-4faf-a06f-8a342e0a6b2b','Manisa - Alaşehir','Manisa',28.507018,38.417361],
+  ['8965f58c-d864-4e78-9fa4-167a2db6d4c1','Manisa - Kırkağaç','Manisa',27.794238,39.084079],
+  ['ac05345c-f37e-4ec2-922a-014fa073ac00','Manisa - Salihli','Manisa',28.160130,38.481844],
+  ['b3b86485-67c0-4bf1-8226-1b4d29a9dfe2','Manisa - Soma','Manisa',27.612727,39.182281],
+  ['62f56215-029f-46d5-bf77-9c315d34621b','Manisa - Turgutlu','Manisa',27.709055,38.500255],
+  ['febe0f72-6dc2-43a0-87a8-f47771a7fcca','Manisa - Ulupark','Manisa',27.427055,38.614020],
+  ['ede2ce3f-1911-49d0-a90f-3d188d0efb5e','Manisa - Yunusemre','Manisa',27.385025,38.624700],
+  ['d93f8472-8b36-4854-ac7e-ffdd42f4a254','Mardin','Mardin',40.727067,37.316413],
+  ['76e26377-cda1-41c6-82d3-035c3135bccc','Mardin - Kızıltepe','Mardin',40.592905,37.188797],
+  ['06bf6e3e-7252-41e3-b824-81c8d8ba6882','Mardin - Trafik','Mardin',40.717001,37.324916],
+  ['69cf97d8-8d6b-4fe4-b2c8-db9f2984f8e3','Mersin - Akdeniz','Mersin',34.640994,36.828539],
+  ['5b6adad8-4f3e-4372-ba40-d8f34589dfb3','Mersin - Huzurkent','Mersin',34.814222,36.876587],
+  ['b0d9c5fb-a44c-418e-bd05-b5640e83a3a5','Mersin - İstiklal Cad.','Mersin',34.623690,36.796070],
+  ['65356773-a215-4e00-9dfb-b0de069fd0c8','Mersin - Tarsus','Mersin',34.887580,36.911720],
+  ['70eab846-760b-4ade-9c45-9f70626ed71b','Mersin - Tasucu','Mersin',33.918194,36.302969],
+  ['4a98c392-a772-4c64-9cca-9c859e24736a','Mersin - Toroslar','Mersin',34.599105,36.828652],
+  ['cae3b64c-17b2-4a84-a18e-8a837058cb2e','Mersin - Yenişehir','Mersin',34.558004,36.773719],
+  ['53ff88ea-ffbc-47d0-a4b8-b851863517eb','Muğla - Fethiye','Muğla',29.129145,36.626375],
+  ['f561c8db-71ee-42f7-be51-7c2dbbb7afad','Muğla - Milas','Muğla',27.782952,37.311313],
+  ['8195e14b-e889-4130-ade3-4b76e6f9f14c','Muğla - Milas Ören','Muğla',27.971671,37.030976],
+  ['3f21f025-610c-4471-8fec-0001718dd05e','Muğla - Musluhittin','Muğla',28.353491,37.217006],
+  ['8ed105e7-26b3-401e-b1a9-14a2cbf15f3a','Muğla - Trafik','Muğla',28.366549,37.211749],
+  ['629da8fe-f185-4682-a182-f1503c6d1043','Muğla - Yatağan','Muğla',28.147193,37.343112],
+  ['ef5c7f43-a7ff-46a0-8e48-293a6b9f5a88','Muş','Muş',41.505767,38.741719],
+  ['24886a30-ad4d-4018-8ede-a72b056d321e','Nevşehir','Nevşehir',34.701388,38.623264],
+  ['3cbb31e6-70e4-443b-951f-710d647ac912','Nevşehir - Avanos','Nevşehir',34.847283,38.716154],
+  ['dfabaef6-2ef2-43cf-b12f-92ab0a6c3ec3','Niğde','Niğde',34.685581,37.968392],
+  ['c69adf3a-b2d1-4c6e-8ed1-c949b1251d7f','Niğde - Bor','Niğde',34.553949,37.887243],
+  ['9c73dd7a-36e7-4d55-a5db-ec1d218641f7','Ordu - Altınordu','Ordu',37.878272,40.983645],
+  ['10fec461-d26a-485c-8649-2339a4c2559c','Ordu - Fatsa','Ordu',37.500049,41.027193],
+  ['2cdec331-2c7c-4c98-b7a1-ccae22b5b8e3','Ordu - Karşıyaka','Ordu',37.907639,40.973771],
+  ['12b80551-fa3c-42da-8372-2d12c83689f1','Ordu - Ünye','Ordu',37.279966,41.120864],
+  ['693a75eb-ed69-48e7-a860-fad8bb1be336','Osmaniye','Osmaniye',36.254362,37.085723],
+  ['3782f019-a8cf-4fbc-ab3b-6dcbd9dc55eb','Osmaniye - Kadirli','Osmaniye',36.094867,37.368879],
+  ['f945ce0f-7d60-4e10-a36f-5f4322cc134b','Rize','Rize',40.530927,41.021581],
+  ['f876d75d-2deb-45d0-aea8-81527f471dcc','Rize - Ardeşen','Rize',41.047239,41.127426],
+  ['71c5c671-f4a0-4cb6-8986-941945e73ba6','Sakarya','Sakarya',30.393860,40.766988],
+  ['c199d715-4d05-497e-be36-035503b29407','Sakarya - Hendek OSB - MTHM','Sakarya',30.648592,40.763135],
+  ['bbb2e9fa-25d8-49c5-991c-9aac7bef5c54','Sakarya - Merkez - MTHM','Sakarya',30.410168,40.769161],
+  ['31898e1e-8605-4529-a7ca-97fd52f989b3','Sakarya - Ozanlar - MTHM','Sakarya',30.397120,40.790761],
+  ['c6364fd7-0dc9-41b2-a465-8e41dc2578c9','Samsun - Atakum','Samsun',36.296639,41.325482],
+  ['8a828c41-b151-4ee5-885c-0aac992deb5a','Samsun - Bafra','Samsun',35.908197,41.562041],
+  ['d5182d9a-a966-4c8e-a3d7-380c7cc7878f','Samsun - Canik','Samsun',36.353103,41.262779],
+  ['5338b0b0-796c-4105-a3b5-5101e5661a40','Samsun - İlkadım Hastane','Samsun',36.338087,41.277921],
+  ['32ce0783-a15e-4344-9b14-63537f4f0ce5','Samsun - Tekkeköy','Samsun',36.458392,41.222790],
+  ['38c9f703-bdbb-43bf-ae0e-e51384bbd31e','Samsun - Yüzüncüyıl','Samsun',36.328338,41.290908],
+  ['452a017b-77b6-4e51-9589-eb0416ab2c9a','Siirt','Siirt',41.935100,37.931966],
+  ['9e764d35-42c5-440a-9c3b-2ee939ae328e','Sinop','Sinop',35.154949,42.029568],
+  ['a2d5fdcc-024d-494b-be97-cc14b0436245','Sinop - Boyabat','Sinop',34.776991,41.461232],
+  ['08157243-d18c-41f5-a3fe-3038c6d1da2b','Sinop - Erfelek','Sinop',34.992866,41.945724],
+  ['a02766c5-1afe-40b5-b323-55f86d79e89a','Sivas - Başöğretmen','Sivas',37.025802,39.748652],
+  ['c2c404d6-4e2e-43f3-94d7-9a6813432426','Sivas - İstasyonkavşağı','Sivas',37.013334,39.747301],
+  ['0cb00e22-7298-4a0e-8227-5b87329d592a','Sivas - Meteoroloji','Sivas',37.001734,39.743754],
+  ['9d4d9186-79b9-4667-b34c-c228561dab43','Şanlıurfa','Şanlıurfa',38.786865,37.160390],
+  ['fab9711d-de3e-4326-80ec-4e0d19af5bf3','Şanlıurfa - Eyyübiye','Şanlıurfa',38.809267,37.112872],
+  ['901c1e19-12e9-4f0e-a7cb-d099af4ff7b3','Şanlıurfa - Karaköprü','Şanlıurfa',38.811723,37.202203],
+  ['281afc9d-f012-429c-9cdc-de24e9e817e8','Şırnak','Şırnak',42.455157,37.522783],
+  ['8560f8d1-c514-4a9c-a076-052a7079f680','Şırnak - Silopi','Şırnak',42.469591,37.248336],
+  ['d80457d6-c4ac-4f6a-ad97-5555b2ddb67f','Tekirdağ','Tekirdağ',27.499545,40.970934],
+  ['416f2d64-7c04-4b18-af2f-cb2d42a75d0f','Tekirdağ - Çerkezköy - MTHM','Tekirdağ',27.980146,41.318348],
+  ['1e84823d-9992-40ed-9257-be447dd8c2a3','Tekirdağ - Çorlu - MTHM','Tekirdağ',27.817720,41.156212],
+  ['d3359315-e62c-4d26-aecf-ed5d7e352e33','Tekirdağ - Çorlu OSB - MTHM','Tekirdağ',27.815431,41.180727],
+  ['6158df4b-50eb-4461-a619-97bf9717780d','Tekirdağ - Merkez - MTHM','Tekirdağ',27.502982,40.977212],
+  ['345297d6-3f00-477c-94f8-d4cc7a4a7cc3','Tokat','Tokat',36.555097,40.326396],
+  ['ae8b4d53-7a34-4f5b-a9c1-f3c0d35a9e0f','Tokat - Erbaa','Tokat',36.561510,40.670287],
+  ['29125b03-49f3-46eb-bf3a-35a6fa844d6f','Tokat - Meydan','Tokat',36.551938,40.318326],
+  ['e3d45e29-8ff9-483c-8799-9829ff8db98c','Tokat - Turhal','Tokat',36.082868,40.385633],
+  ['ade43981-6a03-4b4e-9137-c5867d5481f0','Trabzon - Akçaabat','Trabzon',39.591810,41.014133],
+  ['56d322ed-3bea-466c-a701-16eca2124ef2','Trabzon - Beşirli','Trabzon',39.667858,40.994403],
+  ['a7bad77d-1c2f-4de7-9208-70631bddaa25','Trabzon - Fatih','Trabzon',39.692564,40.998711],
+  ['56efb065-267d-4b21-91c9-2f9d880cd213','Trabzon - Meydan','Trabzon',39.731206,41.002425],
+  ['1fecf6fd-e459-4712-86d2-121852ddc8ad','Trabzon - Uzungöl','Trabzon',40.299356,40.617906],
+  ['bfe1d1e3-31f6-40ed-81bc-45513c3807c4','Trabzon - Valilik','Trabzon',39.712551,41.005845],
+  ['581f18fd-cabd-42eb-9f87-fcfb94a0534e','Tunceli','Tunceli',39.544471,39.109533],
+  ['1391e55f-9df5-429c-b2fb-ed4a8e44a73f','Uşak','Uşak',29.404508,38.663954],
+  ['99cf689e-1e80-4b00-a641-b37eb694014a','Uşak-Trafik','Uşak',29.406133,38.673176],
+  ['48664c85-bace-45f2-bb43-7da82213fd7d','Van','Van',43.359861,38.519197],
+  ['4fab1c99-0bc7-46fb-9f9d-f03ebb52650d','Van - İpekyolu','Van',43.405174,38.490640],
+  ['5a23cf12-2acd-4813-b3c3-a98edc41d3f2','Yalova','Yalova',29.261606,40.653403],
+  ['dee414ee-760e-4c9f-8958-5f070e2ba25c','Yalova - Altınova-MTHM','Yalova',29.507801,40.700552],
+  ['94d6bbd2-4811-42e5-a5a0-060f51cc852d','Yalova - Armutlu-MTHM','Yalova',28.784479,40.529223],
+  ['b94d1cf3-140c-496e-9ad1-44e036a33931','Yozgat','Yozgat',34.806923,39.818864],
+  ['813e866c-ff90-4cd7-bfb7-36ff67b13902','Yozgat - Sorgun','Yozgat',35.181494,39.806932],
+  ['df9142f3-3b6c-46d6-8738-1316a6ef64dc','Zonguldak - Çatalağzı Cumayanı','Zonguldak',31.880189,41.496458],
+  ['e6c6c6b4-0ac5-45e8-9186-df25cb79488e','Zonguldak - Çatalağzı Kuzyaka','Zonguldak',31.896509,41.510601],
+  ['86ee28de-6616-4609-84dc-a0b6cad05060','Zonguldak - Çaycuma','Zonguldak',32.083046,41.421370],
+  ['5137df3f-320b-4d01-99ee-7db07c278e8f','Zonguldak - Karadeniz Ereğli','Zonguldak',31.430874,41.251086],
+  ['c3fe5e8e-579d-448b-8137-e7cd7e447ab1','Zonguldak - Kilimli','Zonguldak',31.837814,41.485610],
+  ['be837236-0704-447c-8a43-ccce0f3ded55','Zonguldak - Kozlu','Zonguldak',31.745856,41.435047],
+  ['037f4455-543a-4990-8ba3-254a8c1b0b63','Zonguldak - Muslu Tepeköy','Zonguldak',31.937496,41.526909],
+  ['7058210e-a4b5-4b90-9e46-ec674d6e52cd','Zonguldak - Trafik','Zonguldak',31.787185,41.452286]
+];
+
+var istasyonlar = ee.FeatureCollection(ham.map(function(r) {
+  return ee.Feature(ee.Geometry.Point([r[3], r[4]]), {istasyon_id: r[0], istasyon: r[1], il: r[2]});
+}));
+print('Istasyon sayisi (356 olmali):', istasyonlar.size());
+
+function rasterAktar(img, ad, tr) {
+  Export.image.toDrive({image: img, description: ad, folder: KLASOR, fileNamePrefix: ad,
+    region: BOLGE, crs: CRS, crsTransform: tr || TR_30SS, maxPixels: 1e10});
+}
+function daire(m, normal) { return ee.Kernel.circle({radius: m, units: 'meters', normalize: normal}); }
+// Komsuluk islemini verilen olcekte zorla (reproject convolve'dan SONRA olmali)
+function kon(img, m, normal, olcek) {
+  return img.convolve(daire(m, normal)).reproject({crs: CRS, scale: olcek});
+}
+// Maskeli piksellere dayanikli tampon ortalamasi
+function tamponOrt(img, m, olcek) {
+  var gec = img.mask().reduce(ee.Reducer.min()).rename('g');
+  var pay = kon(img.unmask(0), m, false, olcek);
+  var payda = kon(gec.unmask(0), m, false, olcek);
+  return pay.divide(payda).updateMask(payda.gt(0));
+}
+
+// ---------------- 1) Topografya (SRTM 30 m; tampon istatistikleri 250 m) ----------------
+var dem = ee.Image('USGS/SRTMGL1_003').select('elevation');
+var egim = ee.Terrain.slope(dem);
+var dem250 = dem.reduceResolution({reducer: ee.Reducer.mean(), maxPixels: 128})
+                .reproject({crs: CRS, scale: 250});
+var ort1 = kon(dem250, 1000, true, 250);
+var ort5 = kon(dem250, 5000, true, 250);
+var kare5 = kon(dem250.multiply(dem250), 5000, true, 250);
+var std5 = kare5.subtract(ort5.multiply(ort5)).max(0).sqrt();
+var topo = dem.rename('yukseklik_m').toFloat()
+  .addBands(egim.rename('egim_derece'))
+  .addBands(ort1.rename('yukseklik_ort_1km'))
+  .addBands(ort5.rename('yukseklik_ort_5km'))
+  .addBands(std5.rename('yukseklik_std_5km'))
+  .addBands(dem.toFloat().subtract(ort5).rename('goreli_yukseklik_5km'));
+
+// ---------------- 2) GHS nufus ve yapilasma (2020, 100 m) ----------------
+// DUZELTME: deniz pikselleri (-200 nodata) 0 yapilir; toplamlar yogunluk ortalamasi x daire alani
+// ile hesaplanir (reduceResolution sum yerine mean; ilk surumde toplamlar yaklasik 6 kat dusuktu).
+var popHam = ee.Image('JRC/GHSL/P2023A/GHS_POP/2020').select('population_count');
+var bltHam = ee.Image('JRC/GHSL/P2023A/GHS_BUILT_S/2020').select('built_surface');
+var popYog = popHam.updateMask(popHam.gte(0)).unmask(0).divide(10000)       // kisi / m2
+  .setDefaultProjection(popHam.projection())
+  .reduceResolution({reducer: ee.Reducer.mean(), maxPixels: 64}).reproject({crs: CRS, scale: 250});
+var bltOran = bltHam.updateMask(bltHam.gte(0)).unmask(0).divide(10000)      // yapili alan orani
+  .setDefaultProjection(bltHam.projection())
+  .reduceResolution({reducer: ee.Reducer.mean(), maxPixels: 64}).reproject({crs: CRS, scale: 250});
+var ghs = ee.Image([]);
+[1000, 3000, 5000].forEach(function(m) {
+  ghs = ghs.addBands(kon(popYog, m, true, 250).multiply(Math.PI * m * m).rename('nufus_' + m))
+           .addBands(kon(bltOran, m, true, 250).rename('yapilasma_oran_' + m));
+});
+
+// ---------------- 3) WorldCover 2021 sinif oranlari ----------------
+var SINIF = {10: 'agac', 20: 'cali', 30: 'cayir', 40: 'tarim', 50: 'yapi', 60: 'ciplak', 70: 'kar', 80: 'su', 90: 'sulak'};
+var wcHam = ee.ImageCollection('ESA/WorldCover/v200').first().select('Map');
+var wcProj = wcHam.projection();
+var wc = wcHam.unmask(0).setDefaultProjection(wcProj);
+var wcBant = wc.gt(0).rename('gecerli');
+Object.keys(SINIF).forEach(function(k) { wcBant = wcBant.addBands(wc.eq(parseInt(k, 10)).rename(SINIF[k])); });
+wcBant = wcBant.toFloat().setDefaultProjection(wcProj);
+function wcOran(olcek, tamponlar) {
+  var f = wcBant.reduceResolution({reducer: ee.Reducer.mean(), maxPixels: 1024}).reproject({crs: CRS, scale: olcek});
+  var cikti = ee.Image([]);
+  tamponlar.forEach(function(m) {
+    var o = kon(f, m, true, olcek);
+    var g = o.select('gecerli');
+    Object.keys(SINIF).forEach(function(k) {
+      cikti = cikti.addBands(o.select(SINIF[k]).divide(g).rename('wc_' + SINIF[k] + '_' + m));
+    });
+  });
+  return cikti;
+}
+var wcKucuk = wcOran(100, [500, 1000]);
+var wcBuyuk = wcOran(250, [3000, 5000]);
+
+// ---------------- Disa aktarim (yalniz duzeltilen ikisi) ----------------
+var ANKARA = ee.Geometry.Point([32.85, 39.93]);
+print('KONTROL GHS (Ankara, nufus_1000 on binler olmali):',
+  ghs.reduceRegion({reducer: ee.Reducer.first(), geometry: ANKARA, scale: 30}));
+rasterAktar(topo.addBands(ghs).toFloat(), 'izg_statik_topo_ghs');
+var statikHepsi = topo.addBands(ghs).addBands(wcKucuk).addBands(wcBuyuk);
+var istStatik = statikHepsi.sampleRegions({collection: istasyonlar, scale: 30, geometries: false});
+Export.table.toDrive({collection: istStatik, description: 'ist_statik_izgara', folder: KLASOR,
+  fileNamePrefix: 'ist_statik_izgara', fileFormat: 'CSV'});
+print('Tasks sekmesinde 2 gorev olustu. Run all deyin.');
