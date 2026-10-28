@@ -2,8 +2,10 @@ cff-version: 1.2.0
 message: "If you use this software or the maps, please cite them as below."
 title: "turkiye-airquality-1km: code and 1 km air quality maps for Türkiye"
 version: 1.0.0
-date-released: 2026-10-29
+date-released: 2026-10-28
 license: MIT
+doi: 10.5281/zenodo.23741838
+repository-code: "https://github.com/netmetre/turkiye-airquality-1km"
 authors:
   - family-names: "Gültekin"
     given-names: "Fatih"

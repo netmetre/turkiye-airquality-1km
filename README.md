@@ -1,5 +1,7 @@
 # turkiye-airquality-1km
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.23741838.svg)](https://doi.org/10.5281/zenodo.23741838)
+
 Code, 1 km maps and result tables for the study
 
 > Gültekin, F. *Spatially validated machine learning for nationwide multi-pollutant air quality mapping and population exposure assessment in Türkiye*. Submitted to Environmental Modelling & Software.
@@ -60,7 +62,9 @@ Code: MIT License (see `LICENSE`). Maps and tables in `maps/` and `tables/`: CC 
 
 ## Citation
 
-See `CITATION.cff`. Please cite the archived release (Zenodo DOI) and the paper.
+Gültekin, F. (2026). turkiye-airquality-1km: code, 1 km air quality maps and exposure tables for Türkiye (v1.0.0). Zenodo. https://doi.org/10.5281/zenodo.23741838
+
+See also `CITATION.cff`. Please cite this archive and the paper.
 
 ## Contact
 
